@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资源纳管系统 · 管理后台原型</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="vendor/element-plus.css">
+<link rel="stylesheet" href="css/app.css">
+<style>[v-cloak]{display:none}</style>
+</head>
+<body>
+<div id="app" class="app" v-cloak>
+
+  <!-- ═══════════════ 侧边栏 ═══════════════ -->
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-mark">
+        <rh-icon name="layers" :size="17"></rh-icon>
+        <i></i>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">资源纳管</span>
+        <span class="brand-sub">RESOURCE HUB</span>
+      </div>
+    </div>
+
+    <div class="nav-label">NAVIGATION</div>
+    <nav class="nav">
+      <button v-for="(m, i) in menus" :key="m.key" class="nav-item"
+              :class="{ active: view === m.key }" @click="switchView(m.key)">
+        <span class="nav-idx">0{{ i + 1 }}</span>
+        <span class="nav-ic"><rh-icon :name="m.icon" :size="16"></rh-icon></span>
+        <span class="nav-txt">{{ m.label }}</span>
+        <span class="nav-count">{{ m.count }}</span>
+      </button>
+    </nav>
+
+    <div class="side-sub">
+      <div class="side-sub-title">QUICK / 待处理</div>
+      <div class="side-sub-item"><span class="dot warn"></span>待校验实例<b>07</b></div>
+      <div class="side-sub-item"><span class="dot err"></span>离线资源<b>01</b></div>
+      <div class="side-sub-item"><span class="dot ok"></span>今日同步<b>128</b></div>
+    </div>
+
+    <div class="side-foot">
+      <div class="sys-line"><span class="dot ok"></span><span>纳管服务正常</span><b>99.98%</b></div>
+      <div class="sys-meta">NODE 12/12 · AGENT v2.4.0</div>
+      <div class="sys-bar"><span style="width:92%"></span></div>
+    </div>
+  </aside>
+
+  <div class="shell">
+    <!-- ═══════════════ 顶栏 / 面包屑 ═══════════════ -->
+    <header class="topbar">
+      <div class="crumb">
+        <span class="crumb-root">资源纳管系统</span>
+        <span class="sep"><rh-icon name="chevronRight" :size="12"></rh-icon></span>
+        <span class="crumb-group">{{ currentMenu.group }}</span>
+        <span class="sep"><rh-icon name="chevronRight" :size="12"></rh-icon></span>
+        <span class="crumb-cur">{{ currentMenu.label }}</span>
+        <span class="mono">{{ currentMenu.code }}</span>
+      </div>
+
+      <div class="top-right">
+        <label class="gsearch">
+          <rh-icon name="search" :size="14"></rh-icon>
+          <input v-model="globalQuery" placeholder="搜索资源、实例或编码" @keyup.enter="runGlobalSearch">
+          <kbd>⌘K</kbd>
+        </label>
+        <button class="icon-btn" title="通知"><rh-icon name="bell" :size="16"></rh-icon><span class="ping"></span></button>
+        <button class="icon-btn" title="帮助"><rh-icon name="info" :size="16"></rh-icon></button>
+        <div class="divider-v"></div>
+        <div class="user">
+          <div class="avatar">ZW</div>
+          <div class="user-t"><b>张 伟</b><span>资源管理员</span></div>
+        </div>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <main class="main">
+
+        <!-- ═══════════════ 01 资源定义 ═══════════════ -->
+        <section class="view" v-if="view === 'define'">
+          <div class="page-head">
+            <div>
+              <div class="eyebrow"><b>SECTION 01</b><span>/</span>RESOURCE DEFINITION</div>
+              <div class="page-title">
+                <h1>资源定义</h1>
+                <span class="cnt">{{ types.length }} TYPES</span>
+              </div>
+              <p class="lede">定义资源类型的属性模板，作为实例化与拓扑挂载的依据。属性由用户自定义，支持随时增删改。</p>
+            </div>
+            <div class="head-actions">
+              <el-button plain @click="toast('已打开模板导入向导（原型示意）')">
+                <rh-icon name="download" :size="14"></rh-icon><span style="margin-left:6px">导入模板</span>
+              </el-button>
+              <el-button type="primary" @click="openTypeCreate">
+                <rh-icon name="plus" :size="14"></rh-icon><span style="margin-left:5px">新建资源类型</span>
+              </el-button>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <el-input v-model="defineQuery" placeholder="搜索类型名称、编码或属性" clearable style="width:250px">
+              <template v-slot:prefix><rh-icon name="search" :size="14" style="color:var(--ink-4)"></rh-icon></template>
+            </el-input>
+            <div class="chips">
+              <button v-for="c in categories" :key="c.key" class="chip"
+                      :class="{ on: defineCat === c.key }" @click="defineCat = c.key">
+                {{ c.label }}<b>{{ catCount(c.key) }}</b>
+              </button>
+            </div>
+            <div class="toolbar-right">
+              <span class="meta-note">SYNC 10:24:08</span>
+              <button class="icon-btn" title="刷新" @click="toast('已重新拉取资源定义')"><rh-icon name="refresh" :size="15"></rh-icon></button>
+            </div>
+          </div>
+
+          <div class="body-scroll">
+            <div class="grid-types">
+              <article v-for="t in filteredTypes" :key="t.id" class="tcard rise"
+                       :class="{ active: selectedTypeId === t.id }"
+                       :style="{ '--tone': t.tone }" @click="selectType(t.id)">
+                <span class="tick tl"></span><span class="tick tr"></span>
+                <span class="tick bl"></span><span class="tick br"></span>
+
+                <div class="tc-top">
+                  <div class="tc-glyph"><rh-icon :name="t.icon" :size="19"></rh-icon></div>
+                  <div class="tc-title">
+                    <h3>{{ t.name }}</h3>
+                    <div class="tc-code">{{ t.code }} · V{{ t.version }}</div>
+                  </div>
+                  <el-dropdown trigger="click" placement="bottom-end" @command="cmd => onTypeCommand(cmd, t)">
+                    <button class="icon-btn xs" @click.stop title="更多操作">
+                      <rh-icon name="more" :size="15"></rh-icon>
+                    </button>
+                    <template v-slot:dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="view">查看定义</el-dropdown-item>
+                        <el-dropdown-item command="edit">编辑定义</el-dropdown-item>
+                        <el-dropdown-item command="copy">复制为新类型</el-dropdown-item>
+                        <el-dropdown-item command="delete" divided class="is-danger">删除类型</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+
+                <p class="tc-desc">{{ t.desc }}</p>
+
+                <div class="tc-stats">
+                  <div><span class="num mono">{{ t.attrs.length }}</span><span>属性</span></div>
+                  <div><span class="num mono">{{ t.instances }}</span><span>实例</span></div>
+                  <div><span class="num mono">{{ t.pools }}</span><span>资源池</span></div>
+                </div>
+
+                <div class="tc-attrs">
+                  <span class="atag" v-for="a in t.attrs.slice(0, 4)" :key="a.key">
+                    {{ a.name }}<i>{{ typeLabel(a.type) }}</i>
+                  </span>
+                  <span class="atag more" v-if="t.attrs.length > 4">+{{ t.attrs.length - 4 }}</span>
+                </div>
+
+                <div class="tc-foot">
+                  <span>{{ t.updated }} / {{ t.owner }}</span>
+                  <span class="tc-link">查看定义<rh-icon name="arrowRight" :size="12"></rh-icon></span>
+                </div>
+              </article>
+
+              <button class="tcard ghost" @click="openTypeCreate">
+                <rh-icon name="plus" :size="20"></rh-icon>
+                <span>新建资源类型</span>
+                <small>BLANK / TEMPLATE</small>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ═══════════════ 02 资源实例化 ═══════════════ -->
+        <section class="view" v-if="view === 'instance'">
+          <div class="page-head">
+            <div>
+              <div class="eyebrow"><b>SECTION 02</b><span>/</span>INSTANTIATION</div>
+              <div class="page-title">
+                <h1>资源实例化</h1>
+                <span class="cnt">{{ TOTAL }} RECORDS</span>
+              </div>
+              <p class="lede">按已定义的类型生成具体资源实体，并挂载到区域与项目之下。可按资源种类、区域等维度筛选查看。</p>
+            </div>
+            <div class="head-actions">
+              <el-button plain @click="toast('已打开批量导入向导（原型示意）')">
+                <rh-icon name="download" :size="14"></rh-icon><span style="margin-left:6px">批量导入</span>
+              </el-button>
+              <el-button type="primary" @click="openInstanceCreate">
+                <rh-icon name="plus" :size="14"></rh-icon><span style="margin-left:5px">实例化资源</span>
+              </el-button>
+            </div>
+          </div>
+
+          <div class="statstrip">
+            <div class="stat-cell">
+              <div class="stat-k">TOTAL INSTANCES</div>
+              <div class="stat-v"><b>{{ stats.total }}</b><small>已纳管实例</small></div>
+              <div class="stat-bar"><i style="background:var(--brand-500);width:100%"></i></div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-k"><span class="dot ok"></span>ONLINE</div>
+              <div class="stat-v"><b>{{ stats.online }}</b><small>在线运行</small></div>
+              <div class="stat-bar"><i style="background:var(--ok)" :style="{ width: stats.pOnline + '%' }"></i></div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-k"><span class="dot warn"></span>WARNING</div>
+              <div class="stat-v"><b>{{ stats.warning }}</b><small>需人工介入</small></div>
+              <div class="stat-bar"><i style="background:var(--warn)" :style="{ width: stats.pWarn + '%' }"></i></div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-k"><span class="dot err"></span>OFFLINE / IDLE</div>
+              <div class="stat-v"><b>{{ stats.offline + stats.idle }}</b><small>离线或待激活</small></div>
+              <div class="stat-bar"><i style="background:var(--danger)" :style="{ width: stats.pOff + '%' }"></i></div>
+            </div>
+          </div>
+
+          <div class="filterbar">
+            <span class="fb-label">FILTER</span>
+            <el-select v-model="fType" placeholder="全部资源种类" style="width:150px">
+              <el-option label="全部资源种类" value=""></el-option>
+              <el-option v-for="t in types" :key="t.id" :label="t.name" :value="t.id"></el-option>
+            </el-select>
+            <el-select v-model="fRegion" placeholder="全部区域" style="width:126px">
+              <el-option label="全部区域" value=""></el-option>
+              <el-option v-for="r in regionOptions" :key="r" :label="r" :value="r"></el-option>
+            </el-select>
+            <el-select v-model="fProject" placeholder="全部项目" style="width:150px">
+              <el-option label="全部项目" value=""></el-option>
+              <el-option v-for="p in projectOptions" :key="p" :label="p" :value="p"></el-option>
+            </el-select>
+            <div class="fb-sep"></div>
+            <el-select v-model="fStatus" placeholder="全部状态" style="width:112px">
+              <el-option label="全部状态" value=""></el-option>
+              <el-option label="在线" value="online"></el-option>
+              <el-option label="告警" value="warning"></el-option>
+              <el-option label="离线" value="offline"></el-option>
+              <el-option label="待激活" value="idle"></el-option>
+            </el-select>
+            <el-input v-model="fQuery" placeholder="实例名称 / 编码 / IP" clearable style="width:200px">
+              <template v-slot:prefix><rh-icon name="search" :size="14" style="color:var(--ink-4)"></rh-icon></template>
+            </el-input>
+            <el-button link style="color:var(--ink-3);font-size:11.5px" @click="resetFilters">重置</el-button>
+            <div class="fb-count">本页 MATCH <b>{{ filteredInstances.length }}</b> / {{ instances.length }}</div>
+          </div>
+
+          <div class="body-scroll">
+            <div class="grid-inst" v-if="filteredInstances.length">
+              <el-popover v-for="it in filteredInstances" :key="it.id" placement="right-start"
+                          :width="286" trigger="hover" :show-after="260" :hide-after="60"
+                          popper-class="rh-pop" append-to-body>
+                <template v-slot:reference>
+                  <article class="icard" :data-status="it.status"
+                           :class="{ active: selectedInstId === it.id }" @click="selectInstance(it.id)">
+                    <div class="ic-head">
+                      <span class="dot" :class="statusDot(it.status)"></span>
+                      <h3>{{ it.name }}</h3>
+                      <rh-icon name="chevronRight" :size="13" style="color:var(--ink-4);margin-top:2px"></rh-icon>
+                    </div>
+                    <div class="ic-type" :style="{ '--tone': toneOf(it.type) }">
+                      <span class="ttag">{{ typeName(it.type) }}</span>
+                      <span class="ic-code">{{ it.code }}</span>
+                    </div>
+                    <dl class="kv">
+                      <div class="kv-row" v-for="s in it.spec" :key="s.k">
+                        <dt>{{ s.k }}</dt><dd>{{ s.v }}</dd>
+                      </div>
+                    </dl>
+                    <div class="ic-loc">
+                      <rh-icon name="pin" :size="12"></rh-icon>
+                      <span>{{ it.region }} / {{ it.project }}</span>
+                    </div>
+                    <div class="ic-foot">
+                      <div class="load">
+                        <div class="load-t"><span>LOAD</span><b>{{ it.load }}%</b></div>
+                        <div class="load-bar"><i :style="{ width: it.load + '%' }"></i></div>
+                      </div>
+                      <span class="st-text">{{ statusText(it.status) }}</span>
+                    </div>
+                  </article>
+                </template>
+
+                <div class="pop">
+                  <div class="pop-head">
+                    <h4>{{ it.name }}</h4>
+                    <div class="mono">{{ it.code }} · {{ typeName(it.type) }}</div>
+                  </div>
+                  <div class="pop-body">
+                    <div class="pop-sec">LOCATION / 归属</div>
+                    <dl class="pop-kv">
+                      <dt>区域</dt><dd>{{ it.region }}</dd>
+                      <dt>项目</dt><dd>{{ it.project }}</dd>
+                    </dl>
+                    <div class="pop-sec">SPEC / 主要属性</div>
+                    <dl class="pop-kv">
+                      <div v-for="s in it.spec" :key="s.k" style="display:contents">
+                        <dt>{{ s.k }}</dt><dd>{{ s.v }}</dd>
+                      </div>
+                    </dl>
+                    <div class="pop-foot">
+                      <span>点击卡片查看完整信息</span>
+                      <b>DETAIL →</b>
+                    </div>
+                  </div>
+                </div>
+              </el-popover>
+            </div>
+
+            <div v-else class="insp-empty" style="padding:70px 0">
+              <div class="box"><rh-icon name="filter" :size="18"></rh-icon></div>
+              <p>当前筛选条件下没有匹配的实例<br><span class="mono" style="font-size:10px">EMPTY RESULT</span></p>
+              <el-button plain size="small" @click="resetFilters">清除筛选</el-button>
+            </div>
+
+            <div class="list-foot">
+              <span class="lf-info">SHOWING 01–{{ filteredInstances.length }} OF {{ TOTAL }} · 每页 12 条</span>
+              <el-pagination background layout="prev, pager, next" :total="TOTAL" :page-size="12"
+                             :current-page="1" small></el-pagination>
+            </div>
+          </div>
+        </section>
+
+        <!-- ═══════════════ 03 资源拓扑结构总览 ═══════════════ -->
+        <section class="view" v-if="view === 'topo'">
+          <div class="page-head">
+            <div>
+              <div class="eyebrow"><b>SECTION 03</b><span>/</span>TOPOLOGY OVERVIEW</div>
+              <div class="page-title">
+                <h1>资源拓扑结构总览</h1>
+                <span class="cnt">{{ nodeTotal }} NODES</span>
+              </div>
+              <p class="lede">系统 → 区域 → 项目 → 资源池的多叉树视图。点击任一节点，在右侧查看该层级的详细构成与占用情况。</p>
+            </div>
+            <div class="head-actions">
+              <el-button plain @click="toast('拓扑快照已导出（原型示意）')">
+                <rh-icon name="share" :size="14"></rh-icon><span style="margin-left:6px">导出拓扑</span>
+              </el-button>
+              <el-button type="primary" @click="expandAll">
+                <rh-icon name="fit" :size="14"></rh-icon><span style="margin-left:5px">展开全部</span>
+              </el-button>
+            </div>
+          </div>
+
+          <div class="topo-wrap">
+            <div class="topo-toolbar">
+              <div class="seg">
+                <button v-for="v in topoViews" :key="v.key" :class="{ on: topoMode === v.key }"
+                        @click="topoMode = v.key">{{ v.label }}</button>
+              </div>
+              <el-input v-model="topoQuery" placeholder="定位节点" clearable style="width:180px">
+                <template v-slot:prefix><rh-icon name="search" :size="14" style="color:var(--ink-4)"></rh-icon></template>
+              </el-input>
+              <div class="topo-note">
+                <span>DEPTH 4</span><span>·</span><span>节点 {{ layout.nodes.length }}</span><span>·</span><span>连线 {{ layout.links.length }}</span>
+              </div>
+              <div class="zoom-group" style="margin-left:auto">
+                <button class="icon-btn" title="缩小" @click="zoomBy(-0.08)"><rh-icon name="zoomOut" :size="14"></rh-icon></button>
+                <span class="zoom-val">{{ Math.round(zoom * 100) }}%</span>
+                <button class="icon-btn" title="放大" @click="zoomBy(0.08)"><rh-icon name="zoomIn" :size="14"></rh-icon></button>
+                <button class="icon-btn" title="适配视图" @click="fitView(true)"><rh-icon name="fit" :size="14"></rh-icon></button>
+              </div>
+            </div>
+
+            <div class="canvas" ref="canvas" :class="{ dragging: panning }"
+                 @mousedown="startPan" @wheel.ctrl.prevent="onWheel">
+              <div class="canvas-inner">
+                <div class="canvas-meta">TOPOLOGY / AUTO-LAYOUT · NODE DETAIL ON SELECT</div>
+                <svg :width="layout.w * zoom" :height="layout.h * zoom"
+                     :viewBox="`0 0 ${layout.w} ${layout.h}`" style="display:block">
+                  <g class="links">
+                    <path v-for="l in layout.links" :key="l.id" :d="l.d" class="link"
+                          :class="{ on: activeLinkIds.has(l.id) }"></path>
+                  </g>
+                  <g class="nodes">
+                    <g v-for="n in layout.nodes" :key="n.id" class="tn"
+                       :class="{ sel: selectedNodeId === n.id, hit: topoQuery && matchIds.has(n.id), dim: topoQuery && !matchIds.has(n.id) }"
+                       :transform="`translate(${n.x},${n.y})`" @click.stop="selectNodeById(n.id)">
+                      <title>{{ n.name }} · {{ n.meta }}</title>
+                      <rect class="tn-halo" x="-4" y="-4" :width="n.w + 8" :height="n.h + 8" rx="3"></rect>
+                      <rect class="tn-rect" :width="n.w" :height="n.h" rx="2"></rect>
+                      <rect class="tn-bar" :width="n.w" height="2.5" :fill="n.color"></rect>
+                      <text class="tn-kicker" x="12" y="16">{{ levelKicker(n.level) }}</text>
+                      <text class="tn-title" x="12" y="33">{{ n.name }}</text>
+                      <text class="tn-meta" x="12" :y="n.h - 11">{{ n.meta }}</text>
+                      <g v-if="n.level !== 'root'">
+                        <rect x="0" :y="n.h - 4" :width="n.w" height="2" fill="#E7E1D4"></rect>
+                        <rect x="0" :y="n.h - 4" :width="n.w * n.pct / 100" height="2" :fill="n.color" opacity="0.55"></rect>
+                      </g>
+                      <g v-if="n.childCount" class="tn-toggle" :transform="`translate(${n.w},${n.h / 2})`"
+                         @click.stop="toggleNode(n.id)">
+                        <circle r="8"></circle>
+                        <text text-anchor="middle" y="3">{{ n.collapsed ? n.desc : '−' }}</text>
+                      </g>
+                    </g>
+                  </g>
+                </svg>
+              </div>
+              <div class="canvas-legend">
+                <span class="lg"><i style="background:#0a59f7"></i>区域 REGION</span>
+                <span class="lg"><i style="background:#12b76a"></i>项目 PROJECT</span>
+                <span class="lg"><i style="background:linear-gradient(90deg,#12b76a,#7a5af8,#0891b2,#f79009)"></i>资源池 POOL · 按类型着色</span>
+                <span class="lg-sep">SCROLL 平移 · CTRL+滚轮 缩放</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+
+      <!-- ═══════════════ 右侧详情栏 ═══════════════ -->
+      <aside class="inspector" :class="{ closed: !inspectorKind }">
+        <template v-if="inspectorKind === 'type' && selectedType">
+          <div class="insp-head">
+            <div class="insp-kicker">TYPE DEFINITION</div>
+            <h2>{{ selectedType.name }}</h2>
+            <div class="insp-code">{{ selectedType.code }} · V{{ selectedType.version }}</div>
+            <button class="icon-btn xs insp-close" @click="clearSelection" title="关闭"><rh-icon name="close" :size="14"></rh-icon></button>
+          </div>
+          <div class="insp-body">
+            <div class="insp-sec"><p class="insp-desc">{{ selectedType.desc }}</p></div>
+            <div class="insp-sec">
+              <div class="mini-stats">
+                <div><div class="mk">ATTRIBUTES</div><div class="mv">{{ selectedType.attrs.length }}</div></div>
+                <div><div class="mk">INSTANCES</div><div class="mv">{{ selectedType.instances }}</div></div>
+                <div><div class="mk">POOLS</div><div class="mv">{{ selectedType.pools }}</div></div>
+                <div><div class="mk">VERSION</div><div class="mv">v{{ selectedType.version }}</div></div>
+              </div>
+            </div>
+            <div class="insp-sec">
+              <div class="sec-h"><b>属性定义 / FIELDS</b><span class="line"></span><span class="n">{{ selectedType.attrs.length }}</span></div>
+              <div class="attr-table">
+                <div class="attr-row head"><span>属性</span><span>类型</span><span>必填</span><span style="text-align:right">操作</span></div>
+                <div class="attr-row" v-for="(a, i) in selectedType.attrs" :key="a.key + i">
+                  <div class="attr-n">
+                    <b>{{ a.name }}<span class="req" v-if="a.required"> *</span></b>
+                    <code>{{ a.key }}{{ a.unit ? ' · ' + a.unit : '' }}{{ a.options ? ' · ' + a.options : '' }}</code>
+                  </div>
+                  <div class="attr-t">{{ typeLabel(a.type) }}</div>
+                  <div><el-switch :model-value="a.required" size="small" @change="v => toggleRequired(i, v)"></el-switch></div>
+                  <div class="attr-act">
+                    <button class="icon-btn xs" title="编辑" @click="openAttrEdit(i)"><rh-icon name="edit" :size="12"></rh-icon></button>
+                    <button class="icon-btn xs" title="删除" @click="removeAttr(i)"><rh-icon name="trash" :size="12"></rh-icon></button>
+                  </div>
+                </div>
+              </div>
+              <button class="add-attr" @click="openAttrCreate"><rh-icon name="plus" :size="12"></rh-icon>添加属性</button>
+            </div>
+            <div class="insp-sec">
+              <div class="sec-h"><b>管理信息 / META</b><span class="line"></span></div>
+              <dl class="ikv">
+                <dt>类型编码</dt><dd>{{ selectedType.code }}</dd>
+                <dt>所属分类</dt><dd class="txt">{{ catLabel(selectedType.category) }}</dd>
+                <dt>责任人</dt><dd class="txt">{{ selectedType.owner }}</dd>
+                <dt>最近修改</dt><dd>{{ selectedType.updated }}</dd>
+                <dt>引用实例</dt><dd>{{ selectedType.instances }} 个</dd>
+              </dl>
+            </div>
+          </div>
+          <div class="insp-foot">
+            <el-button plain @click="openTypeEdit(selectedType)">编辑定义</el-button>
+            <el-button plain @click="duplicateType(selectedType)">复制</el-button>
+            <el-button plain is-icon style="color:var(--danger)" @click="deleteType(selectedType)" title="删除">
+              <rh-icon name="trash" :size="14"></rh-icon>
+            </el-button>
+          </div>
+        </template>
+
+        <template v-else-if="inspectorKind === 'instance' && selectedInst">
+          <div class="insp-head">
+            <div class="insp-kicker">RESOURCE INSTANCE</div>
+            <h2>{{ selectedInst.name }}</h2>
+            <div class="insp-code">{{ selectedInst.code }}</div>
+            <button class="icon-btn xs insp-close" @click="clearSelection" title="关闭"><rh-icon name="close" :size="14"></rh-icon></button>
+          </div>
+          <div class="insp-body">
+            <div class="insp-sec" style="display:flex;align-items:center;gap:8px">
+              <span class="status-pill" :class="selectedInst.status">
+                <span class="dot" :class="statusDot(selectedInst.status)"></span>{{ statusText(selectedInst.status) }}
+              </span>
+              <span class="ttag" :style="{ '--tone': toneOf(selectedInst.type) }">{{ typeName(selectedInst.type) }}</span>
+              <span class="mono" style="margin-left:auto;font-size:9px;color:var(--ink-4)">HEALTH {{ healthOf(selectedInst) }}</span>
+            </div>
+
+            <div class="insp-sec">
+              <div class="sec-h"><b>归属 / PLACEMENT</b><span class="line"></span></div>
+              <dl class="ikv">
+                <dt>所属区域</dt><dd class="txt">{{ selectedInst.region }}</dd>
+                <dt>所属项目</dt><dd class="txt">{{ selectedInst.project }}</dd>
+                <dt>责任人员</dt><dd class="txt">{{ selectedInst.owner }}</dd>
+                <dt>部署日期</dt><dd>{{ selectedInst.deployed }}</dd>
+              </dl>
+            </div>
+
+            <div class="insp-sec">
+              <div class="sec-h"><b>主要属性 / SPEC</b><span class="line"></span><span class="n">{{ selectedInst.spec.length }}</span></div>
+              <dl class="ikv">
+                <template v-for="s in selectedInst.spec" :key="s.k">
+                  <dt>{{ s.k }}</dt><dd>{{ s.v }}</dd>
+                </template>
+                <template v-for="f in extraFields(selectedInst)" :key="f.k">
+                  <dt>{{ f.k }}</dt><dd>{{ f.v }}</dd>
+                </template>
+              </dl>
+            </div>
+
+            <div class="insp-sec">
+              <div class="sec-h"><b>运行指标 / METRICS</b><span class="line"></span></div>
+              <div class="metric">
+                <div class="metric-t"><span>资源负载</span><b>{{ selectedInst.load }}%</b></div>
+                <div class="metric-bar"><i :class="loadTone(selectedInst.load)" :style="{ width: selectedInst.load + '%' }"></i></div>
+              </div>
+              <div class="metric">
+                <div class="metric-t"><span>近 7 日可用性</span><b>{{ selectedInst.status === 'offline' ? '0.0' : '99.9' }}%</b></div>
+                <div class="metric-bar"><i class="ok" :style="{ width: selectedInst.status === 'offline' ? 2 : 99.9 }"></i></div>
+              </div>
+              <div class="metric">
+                <div class="metric-t"><span>纳管链路完整度</span><b>100%</b></div>
+                <div class="metric-bar"><i class="ok" style="width:100%"></i></div>
+              </div>
+            </div>
+
+            <div class="insp-sec">
+              <div class="sec-h"><b>标签 / TAGS</b><span class="line"></span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:4px">
+                <span class="atag" v-for="tg in selectedInst.tags" :key="tg">{{ tg }}</span>
+              </div>
+            </div>
+
+            <div class="insp-sec">
+              <div class="sec-h"><b>变更记录 / HISTORY</b><span class="line"></span><span class="n">{{ (selectedInst.events || []).length }}</span></div>
+              <div class="timeline">
+                <div class="tl-item" v-for="(e, i) in selectedInst.events" :key="i" :class="e.lv">
+                  <div class="tl-t">{{ e.t }}</div>
+                  <div class="tl-x">{{ e.txt }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="insp-foot">
+            <el-button plain @click="toast('已打开实例配置（原型示意）')">编辑实例</el-button>
+            <el-button type="primary" @click="toast('已发送连通性校验请求')">连通性校验</el-button>
+          </div>
+        </template>
+
+        <template v-else-if="inspectorKind === 'node' && nodeDetail">
+          <div class="insp-head">
+            <div class="insp-kicker">{{ nodeDetail.kicker }}</div>
+            <h2>{{ nodeDetail.title }}</h2>
+            <div class="insp-code">{{ nodeDetail.code }}</div>
+            <button class="icon-btn xs insp-close" @click="clearSelection" title="关闭"><rh-icon name="close" :size="14"></rh-icon></button>
+          </div>
+          <div class="insp-body">
+            <div class="insp-sec" v-if="nodeDetail.desc"><p class="insp-desc">{{ nodeDetail.desc }}</p></div>
+            <div class="insp-sec">
+              <div class="mini-stats">
+                <div v-for="s in nodeDetail.stats" :key="s.k">
+                  <div class="mk">{{ s.k }}</div>
+                  <div class="mv">{{ s.v }}<small v-if="s.u">{{ s.u }}</small></div>
+                </div>
+              </div>
+            </div>
+            <div class="insp-sec" v-if="nodeDetail.metrics.length">
+              <div class="sec-h"><b>占用情况 / UTILIZATION</b><span class="line"></span></div>
+              <div class="metric" v-for="m in nodeDetail.metrics" :key="m.k">
+                <div class="metric-t"><span>{{ m.k }}</span><b>{{ m.v }}%</b></div>
+                <div class="metric-bar"><i :class="m.tone || loadTone(m.v)" :style="{ width: m.v + '%' }"></i></div>
+              </div>
+            </div>
+            <div class="insp-sec">
+              <div class="sec-h"><b>属性 / FACTS</b><span class="line"></span></div>
+              <dl class="ikv">
+                <template v-for="f in nodeDetail.facts" :key="f.k">
+                  <dt>{{ f.k }}</dt><dd class="txt">{{ f.v }}</dd>
+                </template>
+              </dl>
+            </div>
+            <div class="insp-sec" v-if="nodeDetail.rows.length">
+              <div class="sec-h"><b>{{ nodeDetail.rowsTitle }}</b><span class="line"></span><span class="n">{{ nodeDetail.rows.length }}</span></div>
+              <div class="row-list">
+                <button class="row-item" v-for="r in nodeDetail.rows" :key="r.id" @click="onRowClick(r)">
+                  <i class="sq" :style="{ '--c': r.color }"></i>
+                  <span class="ri-t"><b>{{ r.name }}</b><span>{{ r.code }}</span></span>
+                  <span class="ri-v">{{ r.meta }}</span>
+                  <rh-icon name="chevronRight" :size="12"></rh-icon>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="insp-foot">
+            <el-button plain @click="toast('已在拓扑中定位该节点')">定位节点</el-button>
+            <el-button type="primary" @click="toast('已打开资源池配置（原型示意）')">管理资源</el-button>
+          </div>
+        </template>
+
+        <div v-else class="insp-empty">
+          <div class="box"><rh-icon name="grid" :size="18"></rh-icon></div>
+          <p>未选择任何对象<br>点击卡片或拓扑节点，查看完整信息</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ═══════════════ 弹窗：资源类型 ═══════════════ -->
+  <el-dialog v-model="typeDialogOpen" width="640px" class="rh-dialog" :close-on-click-modal="false" align-center>
+    <template v-slot:header>
+      <div class="dlg-kicker">{{ typeForm.id ? 'EDIT RESOURCE TYPE' : 'NEW RESOURCE TYPE' }}</div>
+      <div class="dlg-title">{{ typeForm.id ? '编辑资源类型' : '新建资源类型' }}</div>
+    </template>
+
+    <div class="form-grid">
+      <label class="field">
+        <span class="field-l">类型名称 <i>*</i></span>
+        <el-input v-model="typeForm.name" placeholder="如：区域空间"></el-input>
+      </label>
+      <label class="field">
+        <span class="field-l">类型编码 <i>*</i><em>A-Z / .</em></span>
+        <el-input v-model="typeForm.code" placeholder="RS.SPACE"></el-input>
+      </label>
+      <label class="field">
+        <span class="field-l">所属分类</span>
+        <el-select v-model="typeForm.category" style="width:100%">
+          <el-option v-for="c in categories.filter(c => c.key !== 'all')" :key="c.key" :label="c.label" :value="c.key"></el-option>
+        </el-select>
+      </label>
+      <label class="field">
+        <span class="field-l">责任人</span>
+        <el-input v-model="typeForm.owner" placeholder="张 伟"></el-input>
+      </label>
+      <label class="field full">
+        <span class="field-l">类型说明</span>
+        <el-input v-model="typeForm.desc" type="textarea" :rows="2" placeholder="描述该资源类型的用途与适用场景"></el-input>
+      </label>
+    </div>
+
+    <div class="sec-h" style="margin:18px 0 8px">
+      <b>属性模板 / FIELDS</b><span class="line"></span>
+      <span class="n">{{ typeForm.attrs.length }} 项</span>
+    </div>
+    <div class="attr-builder">
+      <div class="ab-head">
+        <span>属性名称</span><span>数据类型</span><span>必填</span><span></span>
+      </div>
+      <div class="ab-row" v-for="(a, i) in typeForm.attrs" :key="i">
+        <el-input v-model="a.name" placeholder="属性名称"></el-input>
+        <el-select v-model="a.type">
+          <el-option v-for="t in attrTypes" :key="t.key" :label="t.label" :value="t.key"></el-option>
+        </el-select>
+        <el-switch v-model="a.required" size="small"></el-switch>
+        <button class="icon-btn xs" style="color:var(--ink-3)" @click="typeForm.attrs.splice(i, 1)" title="移除">
+          <rh-icon name="close" :size="13"></rh-icon>
+        </button>
+      </div>
+      <div class="ab-empty" v-if="!typeForm.attrs.length">NO FIELDS — 点击下方按钮添加</div>
+    </div>
+    <button class="add-attr" @click="addFormAttr"><rh-icon name="plus" :size="12"></rh-icon>添加属性</button>
+
+    <template v-slot:footer>
+      <div style="display:flex;align-items:center;gap:9px">
+        <span class="mono" style="font-size:9px;color:var(--ink-4);letter-spacing:.08em">保存后将同步至实例化配置</span>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <el-button plain @click="typeDialogOpen = false">取消</el-button>
+          <el-button type="primary" @click="saveType">保存定义</el-button>
+        </div>
+      </div>
+    </template>
+  </el-dialog>
+
+  <!-- ═══════════════ 弹窗：属性 ═══════════════ -->
+  <el-dialog v-model="attrDialogOpen" width="500px" class="rh-dialog" :close-on-click-modal="false" align-center>
+    <template v-slot:header>
+      <div class="dlg-kicker">FIELD EDITOR</div>
+      <div class="dlg-title">{{ attrForm.index > -1 ? '编辑属性' : '添加属性' }}</div>
+    </template>
+    <div class="form-grid">
+      <label class="field">
+        <span class="field-l">属性名称 <i>*</i></span>
+        <el-input v-model="attrForm.name" placeholder="如：IP 地址"></el-input>
+      </label>
+      <label class="field">
+        <span class="field-l">属性标识 <i>*</i><em>英文 / 数字</em></span>
+        <el-input v-model="attrForm.key" placeholder="ip"></el-input>
+      </label>
+      <label class="field">
+        <span class="field-l">数据类型</span>
+        <el-select v-model="attrForm.type" style="width:100%">
+          <el-option v-for="t in attrTypes" :key="t.key" :label="t.label" :value="t.key"></el-option>
+        </el-select>
+      </label>
+      <label class="field">
+        <span class="field-l">单位</span>
+        <el-input v-model="attrForm.unit" placeholder="m² / V / 路"></el-input>
+      </label>
+      <label class="field full" v-if="attrForm.type === 'enum'">
+        <span class="field-l">枚举选项<em>以 / 分隔</em></span>
+        <el-input v-model="attrForm.options" placeholder="本地 / 远程 / 自动"></el-input>
+      </label>
+      <div class="field full">
+        <div class="switch-line">
+          <span>该属性为必填项，实例化时必须填写</span>
+          <el-switch v-model="attrForm.required"></el-switch>
+        </div>
+      </div>
+    </div>
+    <template v-slot:footer>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <el-button plain @click="attrDialogOpen = false">取消</el-button>
+        <el-button type="primary" @click="saveAttr">应用</el-button>
+      </div>
+    </template>
+  </el-dialog>
+
+  <!-- ═══════════════ 弹窗：实例化资源 ═══════════════ -->
+  <el-dialog v-model="instDialogOpen" width="540px" class="rh-dialog" :close-on-click-modal="false" align-center>
+    <template v-slot:header>
+      <div class="dlg-kicker">INSTANTIATE RESOURCE</div>
+      <div class="dlg-title">实例化资源</div>
+    </template>
+    <div class="form-grid">
+      <label class="field full">
+        <span class="field-l">资源类型 <i>*</i><em>继承其属性模板</em></span>
+        <el-select v-model="instForm.type" style="width:100%">
+          <el-option v-for="t in types" :key="t.id" :label="`${t.name} · ${t.code}`" :value="t.id"></el-option>
+        </el-select>
+      </label>
+      <label class="field full">
+        <span class="field-l">实例名称 <i>*</i></span>
+        <el-input v-model="instForm.name" placeholder="如：处理器单板 BX-3200-15"></el-input>
+      </label>
+      <label class="field">
+        <span class="field-l">所属区域</span>
+        <el-select v-model="instForm.region" style="width:100%">
+          <el-option v-for="r in ['华东区域', '华北区域', '西南区域']" :key="r" :label="r" :value="r"></el-option>
+        </el-select>
+      </label>
+      <label class="field">
+        <span class="field-l">所属项目</span>
+        <el-select v-model="instForm.project" style="width:100%">
+          <el-option v-for="p in ['张江计算中心', '临港试验场', '亦庄智算基地', '天津验证中心', '成都天府节点']" :key="p" :label="p" :value="p"></el-option>
+        </el-select>
+      </label>
+      <label class="field full">
+        <span class="field-l">IP 地址</span>
+        <el-input v-model="instForm.ip" placeholder="10.24.7.40"></el-input>
+      </label>
+    </div>
+    <p class="mono" style="margin-top:14px;font-size:9px;color:var(--ink-4);letter-spacing:.06em;line-height:1.8">
+      实例创建后状态为「待激活」，需完成连通性校验方可加入资源池。
+    </p>
+    <template v-slot:footer>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <el-button plain @click="instDialogOpen = false">取消</el-button>
+        <el-button type="primary" @click="saveInstance">创建实例</el-button>
+      </div>
+    </template>
+  </el-dialog>
+
+</div>
+
+<script src="vendor/vue.global.prod.js"></script>
+<script src="vendor/element-plus.full.min.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

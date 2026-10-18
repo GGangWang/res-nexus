@@ -83,3 +83,9 @@ backend/*.sql
 backend/sql/**/*.sql
 !backend/sql/upgrade_resource_branding.sql
 *.dump
+
+# 文档生成临时目录、Office 锁文件与本地压缩包（不入库）
+doc/_build_*/
+~$*
+doc/plus-ui-ts.zip
+doc/resource-hub.rar
