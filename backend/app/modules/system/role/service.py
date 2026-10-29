@@ -3,12 +3,13 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.dict_values import EnableStatus
 from app.core.base_schema import AuthSchema, BatchSetAvailable, PageResultSchema
 from app.core.exceptions import CustomException
 from app.modules.system.dept.crud import DeptCRUD
+from app.modules.system.dict.service import DictService
 from app.modules.system.menu.crud import MenuCRUD
 from app.utils.common_util import search_to_dict
+from app.utils.excel_dict import ExcelDictConfig, ExcelDictSnapshot
 from app.utils.excel_util import ExcelUtil
 
 from .crud import RoleCRUD
@@ -22,6 +23,12 @@ from .schema import (
 )
 
 _ROLE_PRELOAD = ["menus", "depts"]
+
+
+EXCEL_DICTS = {
+    "status": ExcelDictConfig("sys_enable_status", code_type=int),
+    "data_scope": ExcelDictConfig("sys_data_scope", code_type=int),
+}
 
 
 class RoleService:
@@ -209,8 +216,7 @@ class RoleService:
                 raise CustomException(msg="该数据不存在")
         await RoleCRUD(self.auth, self.db).set(ids=data.ids, status=data.status)
 
-    @staticmethod
-    async def export_list(role_list: list[dict[str, Any]]) -> bytes:
+    async def export_list(self, role_list: list[dict[str, Any]]) -> bytes:
         """导出角色列表
 
         参数:
@@ -233,17 +239,7 @@ class RoleService:
             "updated_id": "更新者ID",
         }
 
-        # 数据权限映射
-        data_scope_map = {
-            1: "仅本人数据权限",
-            2: "本部门及以下数据权限",
-            3: "全部数据权限",
-        }
+        data = role_list
 
-        # 处理数据
-        data = role_list.copy()
-        for item in data:
-            item["status"] = "启用" if item.get("status") == EnableStatus.ENABLED else "停用"
-            item["data_scope"] = data_scope_map.get(item.get("data_scope", 1), "")
-
-        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict)
+        dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS)
+        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict, dictionary=dictionary)

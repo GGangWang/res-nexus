@@ -1,14 +1,16 @@
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.dict_values import EnableStatus
 from app.core.base_schema import AuthSchema, BatchSetAvailable, PageResultSchema
 from app.core.exceptions import CustomException
 from app.core.logger import logger
+from app.modules.system.dict.service import DictService
 from app.utils.common_util import search_to_dict
+from app.utils.excel_dict import ExcelDictConfig, ExcelDictSnapshot
 from app.utils.excel_util import ExcelUtil
 
 from .crud import DemoCRUD
@@ -19,6 +21,8 @@ from .schema import (
     DemoQueryParam,
     DemoUpdateSchema,
 )
+
+EXCEL_DICTS = {"status": ExcelDictConfig("sys_enable_status", code_type=int)}
 
 
 class DemoService:
@@ -145,8 +149,7 @@ class DemoService:
         """
         await DemoCRUD(self.auth, self.db).set(ids=data.ids, status=data.status)
 
-    @staticmethod
-    async def batch_export(obj_list: list[dict[str, Any]]) -> bytes:
+    async def batch_export(self, obj_list: list[dict[str, Any]]) -> bytes:
         """批量导出示例为 Excel 字节流
 
         参数:
@@ -165,16 +168,16 @@ class DemoService:
             "created_id": "创建者",
         }
 
-        data = obj_list.copy()
+        data = [dict(item) for item in obj_list]
         for item in data:
-            item["status"] = "正常" if item.get("status") == EnableStatus.ENABLED else "停用"
             creator_info = item.get("created_id")
             if isinstance(creator_info, dict):
                 item["created_id"] = creator_info.get("name", "未知")
             else:
                 item["created_id"] = "未知"
 
-        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict)
+        dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS)
+        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict, dictionary=dictionary)
 
     async def batch_import(self, file: UploadFile, update_support: bool = False) -> str:
         """从 Excel 批量导入示例
@@ -189,21 +192,27 @@ class DemoService:
         header_dict: dict[str, str] = {"名称": "name", "状态": "status", "描述": "description"}
 
         try:
-            contents: bytes = await file.read()
-            rows: list[dict[str, Any]] = await ExcelUtil.aread_excel_to_dicts(contents)
-            await file.close()
+            try:
+                contents = await file.read()
+            finally:
+                await file.close()
+            dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS, importing=True)
+            try:
+                rows = await ExcelUtil.aread_excel_to_dicts(contents, dictionary=dictionary, header_mapping=header_dict)
+            except ValueError as exc:
+                raise CustomException(msg=str(exc)) from exc
 
             if not rows:
                 raise CustomException(msg="导入文件为空")
 
-            missing_headers = [h for h in header_dict if h not in rows[0]]
+            missing_headers = [h for h, field in header_dict.items() if field not in rows[0]]
             if missing_headers:
                 raise CustomException(msg=f"导入文件缺少必要的列: {', '.join(missing_headers)}")
 
             # 将中文字段名映射为英文字段
             mapped_rows: list[dict[str, Any]] = []
             for row in rows:
-                mapped_rows.append({en: row.get(ch) for ch, en in header_dict.items()})
+                mapped_rows.append(row)
 
             required_fields: list[str] = ["name", "status"]
             errors: list[str] = []
@@ -221,18 +230,9 @@ class DemoService:
 
             for i, row in enumerate(mapped_rows, start=1):
                 try:
-                    status_str = str(row["status"]).strip()
-                    if status_str == "正常":
-                        status = EnableStatus.ENABLED.value
-                    elif status_str == "停用":
-                        status = EnableStatus.DISABLED.value
-                    else:
-                        error_msgs.append(f"第{i}行: 状态必须是'正常'或'停用'")
-                        continue
-
                     create_data = DemoCreateSchema(
                         name=str(row["name"]),
-                        status=status,
+                        status=row["status"],
                         description=str(row["description"] or ""),
                     )
 
@@ -265,18 +265,7 @@ class DemoService:
             logger.error(f"批量导入示例失败: {e!s}")
             raise
 
-    @staticmethod
-    def import_template_download() -> bytes:
-        """生成示例导入模板 Excel 字节流
-
-        返回:
-        - bytes: Excel 模板文件字节流
-        """
-        header_list: list[str] = ["名称", "状态", "描述"]
-        selector_header_list: list[str] = ["状态"]
-        option_list: list[dict[str, list[str]]] = [{"状态": ["正常", "停用"]}]
-        return ExcelUtil.get_excel_template(
-            header_list=header_list,
-            selector_header_list=selector_header_list,
-            option_list=option_list,
-        )
+    async def import_template_download(self) -> bytes:
+        mapping = {"name": "名称", "status": "状态", "description": "描述"}
+        dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS, importing=True)
+        return await asyncio.to_thread(ExcelUtil.get_excel_template, list(mapping.values()), [], [], dictionary=dictionary, mapping_dict=mapping)

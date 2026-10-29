@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import urllib.parse
 from typing import Annotated
 
@@ -8,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.response import ResponseSchema, StreamResponse, SuccessResponse
 from app.core.base_schema import AuthSchema, BatchSetAvailable, PageResultSchema, PaginationQueryParam
-from app.core.dependencies import AuthPermission, db_getter
+from app.core.dependencies import AuthPermission, db_getter, get_current_user
 from app.core.router_class import OperationLogRoute
 from app.utils.common_util import bytes2file_response
 
@@ -99,7 +98,7 @@ async def export_obj_list_controller(
 ) -> StreamingResponse:
     service = TestDemoBaseService(auth, db)
     result_dict_list = await service.get_list(search=search)
-    export_result = await TestDemoBaseService.batch_export(obj_list=[item.model_dump() for item in result_dict_list])
+    export_result = await TestDemoBaseService(auth, db).batch_export(obj_list=[item.model_dump() for item in result_dict_list])
 
     return StreamResponse(
         data=bytes2file_response(export_result),
@@ -112,7 +111,7 @@ async def export_obj_list_controller(
 async def import_obj_list_controller(
     file: Annotated[UploadFile, File(description="导入文件")],
     auth: Annotated[AuthSchema, Security(AuthPermission(["module_demo:test_demo_base:import"]))],
-    db: Annotated[AsyncSession, Depends(db_getter)],
+    db: Annotated[AsyncSession, Depends(db_getter, scope="function")],
 ) -> JSONResponse:
     service = TestDemoBaseService(auth, db)
     batch_import_result = await service.batch_import(file=file, update_support=True)
@@ -120,8 +119,11 @@ async def import_obj_list_controller(
 
 
 @TestDemoBaseRouter.post("/download/template", summary="获取基础测试管理导入模板", dependencies=[Security(AuthPermission(["module_demo:test_demo_base:download"]))])
-async def export_obj_template_controller() -> StreamingResponse:
-    import_template_result = TestDemoBaseService.import_template_download()
+async def export_obj_template_controller(
+    auth: Annotated[AuthSchema, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(db_getter)],
+) -> StreamingResponse:
+    import_template_result = await TestDemoBaseService(auth, db).import_template_download()
 
     return StreamResponse(
         data=bytes2file_response(import_template_result),

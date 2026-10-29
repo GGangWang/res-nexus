@@ -99,7 +99,7 @@ async def export_obj_list_controller(
     search: Annotated[PositionQueryParam, Body()],
 ) -> StreamingResponse:
     position_query_result: list[PositionOutSchema] = await PositionService(auth, db).get_list(search=search)
-    position_export_result: bytes = await PositionService.export_list(position_list=[item.model_dump() for item in position_query_result])
+    position_export_result: bytes = await PositionService(auth, db).export_list(position_list=[item.model_dump() for item in position_query_result])
 
     return StreamResponse(
         data=bytes2file_response(position_export_result),

@@ -2,10 +2,11 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.dict_values import EnableStatus
 from app.core.base_schema import AuthSchema, BatchSetAvailable, PageResultSchema
 from app.core.exceptions import CustomException
+from app.modules.system.dict.service import DictService
 from app.utils.common_util import search_to_dict
+from app.utils.excel_dict import ExcelDictConfig, ExcelDictSnapshot
 from app.utils.excel_util import ExcelUtil
 
 from .crud import PositionCRUD
@@ -15,6 +16,10 @@ from .schema import (
     PositionQueryParam,
     PositionUpdateSchema,
 )
+
+EXCEL_DICTS = {
+    "status": ExcelDictConfig("sys_enable_status", code_type=int),
+}
 
 
 class PositionService:
@@ -92,8 +97,7 @@ class PositionService:
                 raise CustomException(msg="该数据不存在")
         await PositionCRUD(self.auth, self.db).set(ids=data.ids, status=data.status)
 
-    @staticmethod
-    async def export_list(position_list: list[dict]) -> bytes:
+    async def export_list(self, position_list: list[dict]) -> bytes:
         mapping_dict = {
             "id": "编号",
             "name": "岗位名称",
@@ -105,8 +109,8 @@ class PositionService:
             "created_id": "创建者ID",
             "updated_id": "更新者ID",
         }
-        data = position_list.copy()
+        data = [dict(item) for item in position_list]
         for item in data:
-            item["status"] = "启用" if item.get("status") == EnableStatus.ENABLED else "停用"
             item["creator"] = item.get("created_by", {}).get("name", "未知") if isinstance(item.get("created_by"), dict) else "未知"
-        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict)
+        dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS)
+        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict, dictionary=dictionary)

@@ -1,13 +1,15 @@
+import asyncio
 from typing import Any
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.dict_values import EnableStatus
 from app.core.base_schema import AuthSchema, BatchSetAvailable, PageResultSchema
 from app.core.exceptions import CustomException
 from app.core.logger import logger
+from app.modules.system.dict.service import DictService
 from app.utils.common_util import search_to_dict
+from app.utils.excel_dict import ExcelDictConfig, ExcelDictSnapshot
 from app.utils.excel_util import ExcelUtil
 
 from .crud import TestDemoBaseCRUD
@@ -17,6 +19,8 @@ from .schema import (
     TestDemoBaseQueryParam,
     TestDemoBaseUpdateSchema,
 )
+
+EXCEL_DICTS = {"user_sex": ExcelDictConfig("sys_user_sex", code_type=int)}
 
 
 class TestDemoBaseService:
@@ -81,8 +85,7 @@ class TestDemoBaseService:
     async def set_available(self, data: BatchSetAvailable) -> None:
         await TestDemoBaseCRUD(self.auth, self.db).set(ids=data.ids, status=data.status)
 
-    @staticmethod
-    async def batch_export(obj_list: list[dict[str, Any]]) -> bytes:
+    async def batch_export(self, obj_list: list[dict[str, Any]]) -> bytes:
         mapping_dict = {
             "created_time": "创建时间",
             "updated_time": "更新时间",
@@ -91,16 +94,16 @@ class TestDemoBaseService:
             "user_sex": "性别",
         }
 
-        data = obj_list.copy()
+        data = [dict(item) for item in obj_list]
         for item in data:
-            item["status"] = "启用" if item.get("status") == EnableStatus.ENABLED else "停用"
             creator_info = item.get("created_id")
             if isinstance(creator_info, dict):
                 item["created_id"] = creator_info.get("name", "未知")
             else:
                 item["created_id"] = "未知"
 
-        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict)
+        dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS)
+        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict, dictionary=dictionary)
 
     async def batch_import(self, file: UploadFile, update_support: bool = False) -> str:
         header_dict = {
@@ -109,21 +112,27 @@ class TestDemoBaseService:
         }
 
         try:
-            contents = await file.read()
-            rows = await ExcelUtil.aread_excel_to_dicts(contents)
-            await file.close()
+            try:
+                contents = await file.read()
+            finally:
+                await file.close()
+            dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS, importing=True)
+            try:
+                rows = await ExcelUtil.aread_excel_to_dicts(contents, dictionary=dictionary, header_mapping=header_dict)
+            except ValueError as exc:
+                raise CustomException(msg=str(exc)) from exc
 
             if not rows:
                 raise CustomException(msg="导入文件为空")
 
-            missing_headers = [h for h in header_dict if h not in rows[0]]
+            missing_headers = [h for h, field in header_dict.items() if field not in rows[0]]
             if missing_headers:
                 raise CustomException(msg=f"导入文件缺少必要的列: {', '.join(missing_headers)}")
 
             # 将中文字段名映射为英文字段
             mapped_rows = []
             for row in rows:
-                mapped_rows.append({en: row.get(ch) for ch, en in header_dict.items()})
+                mapped_rows.append(row)
 
             required_fields = []
             errors = []
@@ -160,20 +169,7 @@ class TestDemoBaseService:
             logger.error(f"批量导入失败: {e!s}")
             raise CustomException(msg=f"导入失败: {e!s}")
 
-    @staticmethod
-    def import_template_download() -> bytes:
-        header_list = [
-            "用户名",
-            "性别",
-        ]
-        selector_header_list = []
-        option_list = []
-
-        selector_header_list.append("性别")
-        option_list.append({"性别": []})
-
-        return ExcelUtil.get_excel_template(
-            header_list=header_list,
-            selector_header_list=selector_header_list,
-            option_list=option_list,
-        )
+    async def import_template_download(self) -> bytes:
+        mapping = {"user_name": "用户名", "user_sex": "性别"}
+        dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS, importing=True)
+        return await asyncio.to_thread(ExcelUtil.get_excel_template, list(mapping.values()), [], [], dictionary=dictionary, mapping_dict=mapping)

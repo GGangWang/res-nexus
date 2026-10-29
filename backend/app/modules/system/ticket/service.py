@@ -5,8 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.dict_values import TicketStatus
 from app.core.base_schema import AuthSchema, PageResultSchema
 from app.core.exceptions import CustomException
+from app.modules.system.dict.service import DictService
 from app.modules.system.user.crud import UserCRUD
 from app.utils.common_util import search_to_dict
+from app.utils.excel_dict import ExcelDictConfig, ExcelDictSnapshot
 from app.utils.excel_util import ExcelUtil
 
 from .crud import TicketCommentCRUD, TicketCRUD
@@ -31,6 +33,12 @@ _TICKET_STATUS_LABELS = {TicketStatus.PENDING: "待处理", TicketStatus.PROCESS
 
 
 _TICKET_PRELOAD = ["assigned_by"]
+
+
+EXCEL_DICTS = {
+    "status": ExcelDictConfig("sys_ticket_status", code_type=int),
+    "ticket_type": ExcelDictConfig("sys_ticket_type"),
+}
 
 
 class TicketService:
@@ -158,8 +166,7 @@ class TicketService:
             done=await crud.count(status=("eq", 2)),
         )
 
-    @staticmethod
-    async def export_list(ticket_list: list[dict[str, Any]]) -> bytes:
+    async def export_list(self, ticket_list: list[dict[str, Any]]) -> bytes:
         """导出工单列表"""
         mapping_dict = {
             "id": "工单编号",
@@ -171,7 +178,8 @@ class TicketService:
             "created_time": "创建时间",
             "updated_time": "更新时间",
         }
-        return await ExcelUtil.aexport_list2excel(list_data=ticket_list, mapping_dict=mapping_dict)
+        dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS)
+        return await ExcelUtil.aexport_list2excel(list_data=ticket_list, mapping_dict=mapping_dict, dictionary=dictionary)
 
 
 class TicketCommentService:

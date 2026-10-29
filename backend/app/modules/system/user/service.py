@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -10,11 +11,13 @@ from app.core.base_schema import AuthSchema, BatchSetAvailable, PageResultSchema
 from app.core.exceptions import CustomException
 from app.core.logger import logger
 from app.modules.system.dept.crud import DeptCRUD
+from app.modules.system.dict.service import DictService
 from app.modules.system.menu.crud import MenuCRUD
 from app.modules.system.menu.schema import MenuOutSchema, MenuTreeOutSchema
 from app.modules.system.position.crud import PositionCRUD
 from app.modules.system.role.crud import RoleCRUD
 from app.utils.common_util import search_to_dict, traversal_to_tree
+from app.utils.excel_dict import ExcelDictConfig, ExcelDictSnapshot
 from app.utils.excel_util import ExcelUtil
 from app.utils.password_util import PwdUtil
 
@@ -38,6 +41,13 @@ _USER_PRELOAD = ["dept", "roles", "positions"]
 
 # 当前用户信息预加载：需完整嵌套关联
 _USER_CURRENT_PRELOAD = ["dept", "positions", "roles.menus", "roles.depts"]
+
+
+EXCEL_DICTS = {
+    "gender": ExcelDictConfig("sys_user_sex"),
+    "status": ExcelDictConfig("sys_enable_status", code_type=int),
+    "is_superuser": ExcelDictConfig("sys_true_false", code_type=bool),
+}
 
 
 class UserService:
@@ -339,21 +349,24 @@ class UserService:
         }
 
         try:
-            contents = await file.read()
-            rows = await ExcelUtil.aread_excel_to_dicts(contents)
-            await file.close()
+            try:
+                contents = await file.read()
+            finally:
+                await file.close()
+            dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), {key: EXCEL_DICTS[key] for key in ("gender", "status")}, importing=True)
+            try:
+                rows = await ExcelUtil.aread_excel_to_dicts(contents, dictionary=dictionary, header_mapping=header_dict)
+            except ValueError as exc:
+                raise CustomException(msg=str(exc)) from exc
 
             if not rows:
                 raise CustomException(msg="导入文件为空")
 
-            missing_headers = [h for h in header_dict if h not in rows[0]]
+            missing_headers = [h for h, field in header_dict.items() if field not in rows[0]]
             if missing_headers:
                 raise CustomException(msg=f"导入文件缺少必要的列: {', '.join(missing_headers)}")
 
-            # 将中文字段名映射为英文字段
-            mapped_rows = []
-            for row in rows:
-                mapped_rows.append({en: row.get(ch) for ch, en in header_dict.items()})
+            mapped_rows = rows
 
             required_fields = ["username", "name", "dept_id"]
             errors = []
@@ -424,7 +437,7 @@ class UserService:
                 "email": str(row["email"]).strip() if row.get("email") is not None else None,
                 "mobile": str(row["mobile"]).strip() if row.get("mobile") is not None else None,
                 "gender": str(row["gender"]).strip() if row.get("gender") is not None else "1",
-                "status": EnableStatus.ENABLED.value if str(row["status"]).strip() == "正常" else EnableStatus.DISABLED.value,
+                "status": row["status"] if row.get("status") is not None else EnableStatus.ENABLED.value,
                 "dept_id": dept_id,
                 "password": await PwdUtil.ahash_password(password=settings.PASSWORD_IMPORT_DEFAULT),
             }
@@ -451,30 +464,12 @@ class UserService:
         except Exception as e:
             return 0, f"第{row_num}行: 异常{e!s}"
 
-    @staticmethod
-    def get_import_template() -> bytes:
-        header_list = [
-            "部门编号",
-            "账号",
-            "昵称",
-            "邮箱",
-            "手机号",
-            "性别",
-            "状态",
-        ]
-        selector_header_list = ["性别", "状态"]
-        option_list = [
-            {"性别": ["男", "女", "未知"]},
-            {"状态": ["正常", "停用"]},
-        ]
-        return ExcelUtil.get_excel_template(
-            header_list=header_list,
-            selector_header_list=selector_header_list,
-            option_list=option_list,
-        )
+    async def get_import_template(self) -> bytes:
+        mapping = {"dept_id": "部门编号", "username": "账号", "name": "昵称", "email": "邮箱", "mobile": "手机号", "gender": "性别", "status": "状态"}
+        dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), {key: EXCEL_DICTS[key] for key in ("gender", "status")}, importing=True)
+        return await asyncio.to_thread(ExcelUtil.get_excel_template, list(mapping.values()), [], [], dictionary=dictionary, mapping_dict=mapping)
 
-    @staticmethod
-    async def export_list(user_list: list[dict[str, Any]]) -> bytes:
+    async def export_list(self, user_list: list[dict[str, Any]]) -> bytes:
         if not user_list:
             raise CustomException(msg="没有数据可导出")
 
@@ -496,12 +491,9 @@ class UserService:
             "updated_id": "更新者ID",
         }
 
-        data = user_list.copy()
+        data = [dict(item) for item in user_list]
         for item in data:
-            item["status"] = "启用" if item.get("status") == EnableStatus.ENABLED else "停用"
-            gender = item.get("gender")
-            item["gender"] = "男" if gender == "1" else ("女" if gender == "2" else "未知")
-            item["is_superuser"] = "是" if item.get("is_superuser") else "否"
             item["creator"] = item.get("created_by", {}).get("name", "未知") if isinstance(item.get("created_by"), dict) else "未知"
 
-        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict)
+        dictionary = await ExcelDictSnapshot.load(DictService(self.auth, self.db), EXCEL_DICTS)
+        return await ExcelUtil.aexport_list2excel(list_data=data, mapping_dict=mapping_dict, dictionary=dictionary)

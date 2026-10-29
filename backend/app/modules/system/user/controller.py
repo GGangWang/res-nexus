@@ -160,8 +160,11 @@ async def batch_set_available_user_controller(
 
 
 @UserRouter.get("/import/template", summary="获取用户导入模板", dependencies=[Security(AuthPermission(["module_system:user:download"]))])
-async def export_user_import_template_controller() -> StreamingResponse:
-    user_import_template_result = UserService.get_import_template()
+async def export_user_import_template_controller(
+    auth: Annotated[AuthSchema, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(db_getter)],
+) -> StreamingResponse:
+    user_import_template_result = await UserService(auth, db).get_import_template()
 
     return StreamResponse(
         data=bytes2file_response(user_import_template_result),
@@ -181,7 +184,7 @@ async def export_user_list_controller(
     search: Annotated[UserQueryParam, Body()],
 ) -> StreamingResponse:
     user_list: list[UserOutSchema] = await UserService(auth, db).get_list(search=search, order_by=page.order_by)
-    user_export_result: bytes = await UserService.export_list(user_list=[item.model_dump() for item in user_list])
+    user_export_result: bytes = await UserService(auth, db).export_list(user_list=[item.model_dump() for item in user_list])
 
     return StreamResponse(
         data=bytes2file_response(user_export_result),
@@ -194,7 +197,7 @@ async def export_user_list_controller(
 async def import_user_list_controller(
     file: Annotated[UploadFile, File(description="用户导入文件")],
     auth: Annotated[AuthSchema, Security(AuthPermission(["module_system:user:import"]))],
-    db: Annotated[AsyncSession, Depends(db_getter)],
+    db: Annotated[AsyncSession, Depends(db_getter, scope="function")],
 ) -> JSONResponse:
     batch_import_result: str = await UserService(auth, db).batch_import(file=file, update_support=True)
     return SuccessResponse(data=batch_import_result, msg="导入用户成功")

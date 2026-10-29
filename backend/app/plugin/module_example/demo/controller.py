@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.response import ResponseSchema, StreamResponse, SuccessResponse
 from app.core.base_schema import AuthSchema, BatchSetAvailable, PageResultSchema, PaginationQueryParam
-from app.core.dependencies import AuthPermission, db_getter
+from app.core.dependencies import AuthPermission, db_getter, get_current_user
 from app.core.router_class import OperationLogRoute
 from app.utils.common_util import bytes2file_response
 
@@ -91,7 +91,7 @@ async def export_obj_list_controller(
     search: Annotated[DemoQueryParam, Body()],
 ) -> StreamingResponse:
     result_dict_list: list[DemoOutSchema] = await DemoService(auth, db).get_list(search=search)
-    export_result: bytes = await DemoService.batch_export(obj_list=[item.model_dump() for item in result_dict_list])
+    export_result: bytes = await DemoService(auth, db).batch_export(obj_list=[item.model_dump() for item in result_dict_list])
 
     return StreamResponse(
         data=bytes2file_response(export_result),
@@ -104,15 +104,18 @@ async def export_obj_list_controller(
 async def import_obj_list_controller(
     file: Annotated[UploadFile, File(description="导入文件")],
     auth: Annotated[AuthSchema, Security(AuthPermission(["module_example:demo:import"]))],
-    db: Annotated[AsyncSession, Depends(db_getter)],
+    db: Annotated[AsyncSession, Depends(db_getter, scope="function")],
 ) -> JSONResponse:
     batch_import_result = await DemoService(auth, db).batch_import(file=file, update_support=True)
     return SuccessResponse(data=batch_import_result, msg="导入示例成功")
 
 
 @DemoRouter.post("/download/template", summary="获取示例导入模板", dependencies=[Security(AuthPermission(["module_example:demo:download"]))])
-async def export_obj_template_controller() -> StreamingResponse:
-    import_template_result: bytes = DemoService.import_template_download()
+async def export_obj_template_controller(
+    auth: Annotated[AuthSchema, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(db_getter)],
+) -> StreamingResponse:
+    import_template_result: bytes = await DemoService(auth, db).import_template_download()
 
     return StreamResponse(
         data=bytes2file_response(import_template_result),
